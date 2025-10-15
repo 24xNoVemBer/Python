@@ -1,0 +1,173 @@
+import pandas as pd
+import numpy as np
+import cv2
+import os
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torch.nn import functional as F
+import warnings
+warnings.filterwarnings('ignore')
+
+np.random.seed(42)
+torch.manual_seed(42)
+
+class ImageDataset(Dataset):
+    def __init__(self, images, labels=None):
+        self.images = images
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = torch.FloatTensor(self.images[idx]).permute(2, 0, 1)
+        if self.labels is not None:
+            return image, torch.LongTensor([self.labels[idx]])[0]
+        return image
+
+class CNNModel(nn.Module):
+    def __init__(self, num_classes):
+        super(CNNModel, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.conv4 = nn.Conv2d(128, 256, 3, padding=1)
+        self.bn4 = nn.BatchNorm2d(256)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(256 * 14 * 14, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, num_classes)
+        self.dropout1 = nn.Dropout(0.5)
+        self.dropout2 = nn.Dropout(0.3)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))
+        x = self.pool(F.relu(self.bn4(self.conv4(x))))
+        x = x.view(x.size(0), -1)
+        x = self.dropout1(F.relu(self.fc1(x)))
+        x = self.dropout2(F.relu(self.fc2(x)))
+        return self.fc3(x)
+
+def load_image(path):
+    img = cv2.imread(path)
+    if img is None: return None
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (224, 224))
+    return img.astype('float32') / 255.0
+
+def load_data(csv_path, image_dir, has_labels=True):
+    df = pd.read_csv(csv_path)
+    images, labels = [], []
+
+    for idx, row in df.iterrows():
+        img = load_image(os.path.join(image_dir, row['image']))
+        if img is not None:
+            images.append(img)
+            if has_labels:
+                labels.append(row['label'])
+        if (idx + 1) % 100 == 0:
+            print(f"Đã tải {idx + 1}/{len(df)} ảnh")
+
+    print(f"Tải thành công {len(images)} ảnh")
+    if has_labels:
+        return np.array(images), np.array(labels)
+    return np.array(images), df['image'].values
+
+def train_model():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Thiết bị: {device}")
+
+    # Tải dữ liệu
+    X_train, y_train = load_data('CUB/train.csv', 'ALL_IMAGES')
+
+    # Mã hóa nhãn
+    encoder = LabelEncoder()
+    y_encoded = encoder.fit_transform(y_train)
+    num_classes = len(encoder.classes_)
+    print(f"Số lớp: {num_classes}")
+
+    # Chia train/val
+    X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
+
+    # Tạo dataloader
+    train_loader = DataLoader(ImageDataset(X_tr, y_tr), batch_size=16, shuffle=True)
+    val_loader = DataLoader(ImageDataset(X_val, y_val), batch_size=16, shuffle=False)
+
+    # Khởi tạo mô hình
+    model = CNNModel(num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    print("Bắt đầu huấn luyện...")
+    for epoch in range(50):
+        model.train()
+        train_loss, correct, total = 0, 0, 0
+
+        for batch_idx, (data, target) in enumerate(train_loader):
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            _, pred = torch.max(output, 1)
+            total += target.size(0)
+            correct += (pred == target).sum().item()
+
+            if batch_idx % 10 == 0:
+                print(f'Epoch {epoch+1}/50, Batch {batch_idx}, Loss: {loss.item():.4f}, Acc: {100.*correct/total:.2f}%')
+
+        # Validation
+        model.eval()
+        val_loss, val_correct, val_total = 0, 0, 0
+        with torch.no_grad():
+            for data, target in val_loader:
+                data, target = data.to(device), target.to(device)
+                output = model(data)
+                val_loss += criterion(output, target).item()
+                _, pred = torch.max(output, 1)
+                val_total += target.size(0)
+                val_correct += (pred == target).sum().item()
+
+        print(f'Epoch {epoch+1} - Train Loss: {train_loss/len(train_loader):.4f}, '
+              f'Train Acc: {100.*correct/total:.2f}%, '
+              f'Val Loss: {val_loss/len(val_loader):.4f}, '
+              f'Val Acc: {100.*val_correct/val_total:.2f}%')
+
+    # Lưu mô hình
+    torch.save(model.state_dict(), 'cnn_model_pytorch.pth')
+
+    # Dự đoán
+    X_test, names = load_data('CUB/test.csv', 'ALL_IMAGES', has_labels=False)
+    test_loader = DataLoader(ImageDataset(X_test), batch_size=32, shuffle=False)
+
+    model.eval()
+    predictions = []
+    with torch.no_grad():
+        for data in test_loader:
+            data = data.to(device)
+            output = model(data)
+            _, pred = torch.max(output, 1)
+            predictions.extend(pred.cpu().numpy())
+
+    # Lưu kết quả
+    pred_labels = encoder.inverse_transform(predictions)
+    result = pd.DataFrame({'image': names, 'label': pred_labels})
+    result.to_csv('prediction.csv', index=False)
+
+    print("Hoàn thành!")
+    print(f"Đã lưu {len(predictions)} dự đoán vào prediction.csv")
+
+if __name__ == "__main__":
+    train_model()
