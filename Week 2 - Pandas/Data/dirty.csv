@@ -1,0 +1,11 @@
+id,name,age,gender,salary,join_date,department
+1,Nguyen Van A,25,male,1000,2021-05-12,IT
+2,Tran Thi B,,female,1200,2020/07/15,HR
+3,Le Van C,NaN,Male,?,2019-03-10,Finance
+4,Pham Thi D,30,FEMALE,2000,2018-14-01,HR
+5,Nguyen Van A,25,male,1000,2021-05-12,IT
+6,Hoang Van E,45,male,7000,,IT
+7,,29,female,3000,2017-06-05,Finance
+8,Le Thi F,26,,4000,2016-02-31,Marketing
+9,Tran Van G,150,male,9000,2022-08-10,HR
+10,Pham Van H,31,male,not_available,2021-11-20,Unknown
