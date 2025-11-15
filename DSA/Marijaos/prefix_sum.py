@@ -18,3 +18,4 @@ def solve():
         print(prefix_sum[r - 1] - (prefix_sum[l - 2] if l > 1 else 0))
 
 solve()
+
