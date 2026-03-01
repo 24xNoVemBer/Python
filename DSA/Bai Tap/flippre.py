@@ -1,24 +1,20 @@
 s = input().strip()
-n = len(s)
-i = 0
-ans = 0
 
-while i < n:
-    if s[i] == 'B':
-        start = i
-        length = 0
-        while i < n and s[i] == 'B':
-            length += 1
-            i += 1
+steps = 0
+flipped = False
 
-        if length == 1:
-            ans += 1
+for i in s:
+    current = i
+
+    if flipped:
+        if current == 'A':
+            current = 'B'
         else:
-            if start == 0:
-                ans += 1
-            else:
-                ans += 2
-    else:
-        i += 1
+            current = 'A'
 
-print(ans)
+    if current == 'B':
+        steps += 1
+        flipped = not flipped
+    if flipped:
+        steps += 1
+print(steps)
